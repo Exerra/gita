@@ -1,6 +1,7 @@
 #! /usr/bin/env bun
 
 import { cancel, group, intro, outro, select, text, confirm, spinner} from "@clack/prompts";
+import chalk from "chalk";
 import simpleGit from "simple-git";
 
 const git = simpleGit({
@@ -10,12 +11,12 @@ const git = simpleGit({
     trimmed: false
 })
 
-intro("Gita by Exerra")
+intro(`${chalk.bold.green("Gita")} by ${chalk.bold("Exerra")}`)
 
 const questions = await group(
     {
         file: () => text({
-            message: "What file(s) do you wish to commit?",
+            message: chalk.bold("What file do you wish to commit?"),
             placeholder: ".",
             initialValue: ".",
             validate(value) {
@@ -23,21 +24,21 @@ const questions = await group(
             }
         }),
         title: () => text({
-            message: "What will be the title?",
+            message: chalk.bold("What will be the title?"),
             validate(value) {
                 if (value.length === 0) return "You must write a title!"
             }
         }),
         description: () => text({
-            message: "What will be the description? (leave blank for no desc.)"
+            message: chalk.bold("What will be the description? (leave blank for no desc.)")
         }),
         push: () => confirm({
-            message: "Do you want to push?"
+            message: chalk.bold("Do you want to push?")
         })
     },
     {
         onCancel: ({ results }) => {
-            cancel("Gita stopped.")
+            cancel("Gita stopped by user action.")
             process.exit(0)
         }
     }
@@ -55,17 +56,17 @@ try {
     await git.add(file)
 
     await git.commit(title, file)
+
+    if (push) {
+        s.message("Pushing...")
+        
+        await git.push()
+    }
 } catch (e) {
     console.log(e)
-    throw new Error("Problem whilst committing", e || "")
+    throw new Error("Problem with Git", e || "")
 
-    cancel("Gita stopped.")
-}
-
-if (push) {
-    s.message("Pushing...")
-    
-    await git.push()
+    cancel("Gita stopped .")
 }
 
 s.stop()
