@@ -7,7 +7,8 @@
   "version": "0.0.1",
   "description": "A simple CLI tool for committing & pushing. Made for personal use.",
   "scripts": {
-    "build": "bun build --target=node ./src/index.ts --outfile=dist/index.js"
+    "build": "bun build --target=node ./src/index.ts --outfile=dist/index.js",
+    "cmd": "bun link"
   },
   "devDependencies": {
     "bun-types": "latest"
