@@ -48,7 +48,7 @@ let { file, title, description, push } = questions
 
 const s = spinner()
 
-s.start("Committing...")
+s.start("Committing")
 
 try {
     await git.init()
@@ -58,7 +58,7 @@ try {
     await git.commit(title, file)
 
     if (push) {
-        s.message("Pushing...")
+        s.message("Pushing")
         
         await git.push()
     }
