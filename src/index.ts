@@ -1,8 +1,10 @@
 #! /usr/bin/env bun
 
-import { cancel, group, intro, outro, select, text, confirm, spinner, path, tasks, Task} from "@clack/prompts";
+import { cancel, group, intro, outro, select, text, confirm, spinner, path, tasks, Task, log } from "@clack/prompts";
 import chalk from "chalk";
-import simpleGit from "simple-git";
+import simpleGit, { GitResponseError, PushResult } from "simple-git";
+
+const version = "0.0.3"
 
 const baseDir = process.cwd()
 
@@ -13,7 +15,7 @@ const git = simpleGit({
     trimmed: false
 })
 
-intro(`${chalk.bold.green("Gita")} by ${chalk.bold("Exerra")}`)
+intro(`${chalk.bold.green("Gita")} ${chalk.gray("(v" + version + ")")} by ${chalk.bold("Exerra")}`)
 
 let file = ""
 
@@ -84,10 +86,33 @@ try {
 
     await tasks(taskList);
 } catch (e) {
-    console.log(e)
-    throw new Error("Problem with Git", e || "")
+    const err = e as GitResponseError<PushResult>
 
-    cancel("Gita stopped .")
+    if (err.message.includes("No configured push destination")) {
+        cancel("No remotes available. Cancelling push. Commit is saved. Add a remote, then run git push.")
+    }
+    // usually happens when a new git repo is made
+    else if (err.message.includes("Committingfatal: The current branch main has no upstream branch.") || err.message.includes("fatal: The current branch main has no upstream branch.")) {
+        try {
+            log.warn("There is no upstream branch. Making main the upstream branch.")
+            const remotes = await git.getRemotes()
+
+            const remote = await select({
+                message: "What remote to push to?",
+                options: remotes.map(remote => ({ label: remote.name, value: remote.name }))
+            })
+
+            await git.push(remote as string, "main", ["--set-upstream"])
+        } catch (e) {
+            const err2 = e as GitResponseError<PushResult>
+
+            log.error(err2.message)
+            cancel("Gita stopped due to an error.")
+        }
+    } else {
+        log.error(err.message)
+        cancel("Gita stopped due to an error.")
+    }
 }
 
 outro("Thanks for using Gita!")

@@ -4,7 +4,7 @@
   "type": "module",
   "types": "dist/index.d.ts",
   "main": "dist/index.js",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "A simple CLI tool for committing & pushing. Made for personal use.",
   "scripts": {
     "build": "bun build --target=node ./src/index.ts --outfile=dist/index.js",
