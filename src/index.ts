@@ -115,4 +115,4 @@ try {
     }
 }
 
-outro("Thanks for using Gita!")
+outro(chalk.gray("Thanks for using Gita!"))
