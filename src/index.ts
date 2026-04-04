@@ -68,9 +68,20 @@ try {
             },
         },
         {
+            title: "Staging",
+            task: async () => {
+                if (commitAll) await git.add(["--all"])
+                else await git.add(file)
+
+                return "Staging complete";
+            },
+        },
+        {
             title: "Committing",
             task: async () => {
-                await git.commit(description ? [title, description] : title, file)
+                if (commitAll) await git.commit(description ? [title, description] : title)
+                else await git.commit(description ? [title, description] : title, file)
+
                 return 'Commit complete';
             },
         }
