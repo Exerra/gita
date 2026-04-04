@@ -4,7 +4,7 @@ import { cancel, group, intro, outro, select, text, confirm, spinner, path, task
 import chalk from "chalk";
 import simpleGit, { GitResponseError, PushResult } from "simple-git";
 
-const version = "0.0.3"
+const version = "0.0.4"
 
 const baseDir = process.cwd()
 
@@ -68,9 +68,20 @@ try {
             },
         },
         {
+            title: "Staging",
+            task: async () => {
+                if (commitAll) await git.add(["--all"])
+                else await git.add(file)
+
+                return "Staging complete";
+            },
+        },
+        {
             title: "Committing",
             task: async () => {
-                await git.commit(description ? [title, description] : title, file)
+                if (commitAll) await git.commit(description ? [title, description] : title)
+                else await git.commit(description ? [title, description] : title, file)
+
                 return 'Commit complete';
             },
         }
