@@ -4,7 +4,7 @@ import { cancel, group, intro, outro, select, text, confirm, spinner, path, task
 import chalk from "chalk";
 import simpleGit, { GitResponseError, PushResult } from "simple-git";
 
-const version = "0.0.3"
+const version = "0.0.4"
 
 const baseDir = process.cwd()
 
