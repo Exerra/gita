@@ -36,7 +36,7 @@ Global config path:
 
 `~/.config/gita/config.json`
 
-Project config path (temperature, enabled, mode only):
+Project config path (temperature, enabled, mode, knowledge base only):
 
 `.gita/config.json`
 
@@ -65,6 +65,12 @@ Example project config (safe subset):
     "mode": "always",
     "temperature": 0.1,
     "skipProviderCheck": false
+  },
+  "knowledgeBase": {
+    "enabled": true,
+    "paths": [".gita/knowledge"],
+    "maxChars": 6000,
+    "includeExtensions": [".md", ".txt", ".markdown", ".mdx", ".json", ".yml", ".yaml"]
   }
 }
 ```
@@ -75,8 +81,20 @@ AI behavior:
 - `ask`: prompt with AI default
 - `none`: manual commit message prompts
 - `skipProviderCheck`: skip the `/models` provider check (some providers do not support this endpoint)
+- when enabled, the knowledge base content is appended to the AI prompt before diff context
 
 If the AI provider check fails, Gita falls back to the manual flow.
+
+# Knowledge base
+
+Gita can include local docs in AI commit prompts. Drop files into `.gita/knowledge` by default.
+
+Settings:
+
+- `enabled`: toggle knowledge base injection
+- `paths`: folders to scan (relative to repo root)
+- `maxChars`: maximum characters injected into the prompt
+- `includeExtensions`: file types to include
 
 # Environment variables
 
