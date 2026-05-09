@@ -1,6 +1,6 @@
 #! /usr/bin/env bun
 
-import { cancel, group, intro, outro, select, text, confirm, spinner, path, tasks, Task, log, isCancel } from "@clack/prompts";
+import { cancel, group, intro, outro, select, text, confirm, tasks, Task, log, isCancel } from "@clack/prompts";
 import chalk from "chalk";
 import simpleGit, { GitResponseError, PushResult } from "simple-git";
 import { readFile } from "node:fs/promises";
@@ -14,6 +14,7 @@ const packageJson = JSON.parse(await readFile(packageJsonPath, "utf8")) as { ver
 const version = packageJson.version ?? "0.0.0";
 
 const baseDir = process.cwd()
+const cancelMessage = "Gita stopped by user action. No commit has been made."
 
 const git = simpleGit({
     baseDir: baseDir,
@@ -30,7 +31,7 @@ if (!(await git.checkIsRepo())) {
     })
 
     if (isCancel(initRepo)) {
-        cancel("Gita stopped by user action.")
+        cancel(cancelMessage)
         process.exit(0)
     }
 
@@ -48,24 +49,45 @@ let file = ""
 const commitAll = await confirm({ message: "Commit all?" })
 
 if (isCancel(commitAll)) {
-    cancel("Gita stopped by user action. No commit has been made.")
+    cancel(cancelMessage)
     process.exit(0)
 }
 
 if (commitAll) file = "."
 else {
-    const selectedPath = await path({
-        message: 'Select a file:',
-        root: baseDir, // Starting directory
-        directory: false, // Set to true to only show directories
-    });
+    const status = await git.status()
+    const statusFiles = Array.from(new Set([
+        ...status.not_added,
+        ...status.modified,
+        ...status.created,
+        ...status.deleted,
+        ...status.renamed.map(({ to }) => to)
+    ]))
 
-    if (isCancel(selectedPath)) {
-        cancel("Gita stopped by user action. No commit has been made.")
+    if (statusFiles.length === 0) {
+        cancel("No changed files found. Nothing to commit.")
         process.exit(0)
     }
 
-    file = selectedPath as string
+    const selectedFile = await select({
+        message: "Select a file:",
+        options: statusFiles.map((statusFile) => ({
+            label: statusFile,
+            value: statusFile
+        }))
+    })
+
+    if (isCancel(selectedFile)) {
+        cancel(cancelMessage)
+        process.exit(0)
+    }
+
+    file = selectedFile as string
+
+    if (!statusFiles.includes(file)) {
+        cancel("Selected file is not in git status. No commit has been made.")
+        process.exit(0)
+    }
 }
 
 
@@ -86,7 +108,7 @@ const questions = await group(
     },
     {
         onCancel: ({ results }) => {
-            cancel("Gita stopped by user action. No commit has been made.")
+            cancel(cancelMessage)
             process.exit(0)
         }
     }
