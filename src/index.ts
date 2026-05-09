@@ -1,6 +1,6 @@
 #! /usr/bin/env bun
 
-import { cancel, group, intro, outro, select, text, confirm, tasks, Task, log, isCancel } from "@clack/prompts";
+import { cancel, group, intro, outro, select, text, confirm, tasks, Task, log, isCancel, spinner } from "@clack/prompts";
 import chalk from "chalk";
 import simpleGit, { GitResponseError, PushResult } from "simple-git";
 import type { SimpleGit, StatusResult } from "simple-git";
@@ -11,6 +11,7 @@ const packageJsonPath = resolve(currentDir, "../package.json");
 const packageJson = JSON.parse(await Bun.file(packageJsonPath).text()) as { version?: string };
 const version = packageJson.version ?? "0.0.0";
 const cliArgs = Bun.argv.slice(2);
+const verboseEnabled = cliArgs.includes("--verbose");
 
 type AiMode = "always" | "ask" | "none";
 type AiConfig = {
@@ -20,6 +21,7 @@ type AiConfig = {
     apiKey?: string;
     model?: string;
     baseUrl?: string;
+    skipProviderCheck?: boolean;
 };
 
 type AppConfig = {
@@ -33,13 +35,15 @@ type AiRuntimeConfig = {
     apiKey?: string;
     model?: string;
     baseUrl?: string;
+    skipProviderCheck: boolean;
 };
 
 const defaultAiConfig: AiRuntimeConfig = {
     enabled: false,
     mode: "none",
     temperature: 0.2,
-    baseUrl: "https://api.openai.com/v1"
+    baseUrl: "https://api.openai.com/v1",
+    skipProviderCheck: false
 };
 
 const resolveHomeDir = (): string | null => {
@@ -71,6 +75,10 @@ const warnOnConflictingAiFlags = (args: string[]) => {
     if (args.includes("--ai") && args.includes("--no-ai")) {
         log.warn("Both --ai and --no-ai passed. Using the last flag.");
     }
+};
+
+const logVerbose = (message: string) => {
+    if (verboseEnabled) log.info(message);
 };
 
 const readJsonFile = async <T>(filePath: string): Promise<T | null> => {
@@ -108,6 +116,7 @@ const mergeAiConfig = (
     if (typeof globalAi.apiKey === "string") merged.apiKey = globalAi.apiKey;
     if (typeof globalAi.model === "string") merged.model = globalAi.model;
     if (typeof globalAi.baseUrl === "string") merged.baseUrl = globalAi.baseUrl;
+    if (typeof globalAi.skipProviderCheck === "boolean") merged.skipProviderCheck = globalAi.skipProviderCheck;
 
     const projectAi = projectConfig?.ai ?? {};
     if (typeof projectAi.enabled === "boolean") {
@@ -118,6 +127,7 @@ const mergeAiConfig = (
     if (typeof projectAi.temperature === "number" && Number.isFinite(projectAi.temperature)) {
         merged.temperature = clampTemperature(projectAi.temperature);
     }
+    if (typeof projectAi.skipProviderCheck === "boolean") merged.skipProviderCheck = projectAi.skipProviderCheck;
 
     if (!merged.apiKey) merged.apiKey = Bun.env.GITA_AI_API_KEY ?? Bun.env.OPENAI_API_KEY;
     if (!merged.model) merged.model = Bun.env.GITA_AI_MODEL ?? Bun.env.OPENAI_MODEL;
@@ -231,29 +241,43 @@ const parseAiCommitMessage = (content: string): { title: string; description?: s
 
 const checkAiProviderStatus = async (ai: AiRuntimeConfig): Promise<boolean> => {
     if (!ai.baseUrl) {
+        logVerbose("AI provider check: missing base URL.");
         log.warn("AI base URL missing. Falling back to manual commit messages.");
         return false;
     }
 
     if (!ai.model) {
+        logVerbose("AI provider check: missing model.");
         log.warn("AI model missing. Falling back to manual commit messages.");
         return false;
     }
 
+    if (ai.skipProviderCheck) {
+        logVerbose("AI provider check skipped by config.");
+        return true;
+    }
+
     try {
-        const response = await fetch(`${normalizeBaseUrl(ai.baseUrl)}/models`, {
+        const requestUrl = `${normalizeBaseUrl(ai.baseUrl)}/models`;
+        logVerbose(
+            `AI provider check request: GET ${requestUrl} | timeout=4000ms | auth=${ai.apiKey ? "yes" : "no"}`
+        );
+        const response = await fetch(requestUrl, {
             method: "GET",
             headers: buildAiHeaders(ai),
             signal: createTimeoutSignal(4000)
         });
 
         if (!response.ok) {
+            logVerbose(`AI provider check failed with status ${response.status}.`);
             log.warn(`AI provider check failed (${response.status}). Falling back to manual commit messages.`);
             return false;
         }
 
+        logVerbose("AI provider check succeeded.");
         return true;
     } catch {
+        logVerbose("AI provider check failed: request error.");
         log.warn("AI provider check failed. Falling back to manual commit messages.");
         return false;
     }
@@ -274,7 +298,12 @@ const generateAiCommitMessage = async (
     const prompt = buildAiPrompt(status, diffStat, diff, commitAll, file);
 
     try {
-        const response = await fetch(`${normalizeBaseUrl(ai.baseUrl)}/chat/completions`, {
+        const requestUrl = `${normalizeBaseUrl(ai.baseUrl)}/chat/completions`;
+        logVerbose(`AI commit request: POST ${requestUrl}`);
+        logVerbose(
+            `AI commit request meta: model=${ai.model} | temperature=${ai.temperature} | max_tokens=180 | timeout=15000ms | prompt_chars=${prompt.length} | auth=${ai.apiKey ? "yes" : "no"}`
+        );
+        const response = await fetch(requestUrl, {
             method: "POST",
             headers: buildAiHeaders(ai),
             signal: createTimeoutSignal(15000),
@@ -296,6 +325,7 @@ const generateAiCommitMessage = async (
         });
 
         if (!response.ok) {
+            logVerbose(`AI response status: ${response.status}`);
             log.warn(`AI commit message generation failed (${response.status}).`);
             return null;
         }
@@ -304,10 +334,14 @@ const generateAiCommitMessage = async (
             choices?: Array<{ message?: { content?: string } }>;
         };
         const content = data.choices?.[0]?.message?.content?.trim();
+        if (content) logVerbose(`AI raw output:\n${content}`);
         if (!content) return null;
 
-        return parseAiCommitMessage(content);
-    } catch {
+        const parsed = parseAiCommitMessage(content);
+        if (!parsed) logVerbose("AI output could not be parsed into title/description.");
+        return parsed;
+    } catch (error) {
+        logVerbose(`AI request failed: ${error instanceof Error ? error.message : "unknown error"}`);
         log.warn("AI commit message generation failed.");
         return null;
     }
@@ -440,8 +474,13 @@ if (shouldUseAi) {
         shouldUseAi = false
     } else {
         if (!status) status = await git.status()
+        const aiSpinner = spinner()
+        aiSpinner.start("Generating AI commit message")
         aiCommitMessage = await generateAiCommitMessage(git, aiConfig, commitAll, file, status)
+        if (aiCommitMessage) aiSpinner.stop("AI commit message ready")
+        else aiSpinner.stop("AI commit message unavailable")
         if (!aiCommitMessage) {
+            logVerbose("AI output unavailable. Falling back to manual input.")
             log.warn("AI commit message unavailable. Falling back to manual input.")
             shouldUseAi = false
         }
@@ -452,14 +491,14 @@ const questions = await group(
     {
         title: () => text({
             message: chalk.bold("What will be the title?"),
-            defaultValue: aiCommitMessage?.title,
+            initialValue: aiCommitMessage?.title,
             validate(value) {
                 if (!value || value.length === 0) return "You must write a title!"
             }
         }),
         description: () => text({
             message: chalk.bold("What will be the description? (leave blank for no desc.)"),
-            defaultValue: aiCommitMessage?.description
+            initialValue: aiCommitMessage?.description
         }),
         push: () => confirm({
             message: chalk.bold("Do you want to push?")

@@ -50,6 +50,7 @@ Example global config:
     "temperature": 0.2,
     "model": "gpt-4o-mini",
     "baseUrl": "https://api.openai.com/v1",
+    "skipProviderCheck": false,
     "apiKey": "YOUR_API_KEY"
   }
 }
@@ -62,7 +63,8 @@ Example project config (safe subset):
   "ai": {
     "enabled": true,
     "mode": "always",
-    "temperature": 0.1
+    "temperature": 0.1,
+    "skipProviderCheck": false
   }
 }
 ```
@@ -72,6 +74,7 @@ AI behavior:
 - `always`: always use AI to draft the title/description
 - `ask`: prompt with AI default
 - `none`: manual commit message prompts
+- `skipProviderCheck`: skip the `/models` provider check (some providers do not support this endpoint)
 
 If the AI provider check fails, Gita falls back to the manual flow.
 
