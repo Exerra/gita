@@ -1,6 +1,6 @@
 # Gita
 
-A simple CLI tool for commiting & pushing. Made for personal use.
+A Bun-first CLI for commit + push workflows with optional AI-assisted commit messages.
 
 # Requirements
 
@@ -8,10 +8,95 @@ A simple CLI tool for commiting & pushing. Made for personal use.
 
 # Install
 
-Install all the dependencies and then run `bun link`.
+Install dependencies and link the CLI.
 
 ```bash
-bun i
-
+bun install
 bun link
 ```
+
+# Usage
+
+Run inside a git repository.
+
+```bash
+gita
+```
+
+AI mode overrides (CLI flags take precedence):
+
+```bash
+gita --ai
+gita --no-ai
+```
+
+# Configuration
+
+Global config path:
+
+`~/.config/gita/config.json`
+
+Project config path (temperature, enabled, mode only):
+
+`.gita/config.json`
+
+Example global config:
+
+```json
+{
+  "ai": {
+    "enabled": true,
+    "mode": "ask",
+    "temperature": 0.2,
+    "model": "gpt-4o-mini",
+    "baseUrl": "https://api.openai.com/v1",
+    "apiKey": "YOUR_API_KEY"
+  }
+}
+```
+
+Example project config (safe subset):
+
+```json
+{
+  "ai": {
+    "enabled": true,
+    "mode": "always",
+    "temperature": 0.1
+  }
+}
+```
+
+AI behavior:
+
+- `always`: always use AI to draft the title/description
+- `ask`: prompt with AI default
+- `none`: manual commit message prompts
+
+If the AI provider check fails, Gita falls back to the manual flow.
+
+# Environment variables
+
+These are optional and can replace config values:
+
+- `GITA_AI_API_KEY` or `OPENAI_API_KEY`
+- `GITA_AI_MODEL` or `OPENAI_MODEL`
+- `GITA_AI_BASE_URL` or `OPENAI_BASE_URL`
+
+# Bun-first design
+
+Gita prefers Bun built-ins for core runtime behavior:
+
+- `Bun.file(...)` for file reads
+- `fetch(...)` for network calls
+- `import.meta.dir` for module paths
+- `Bun.argv` for CLI arguments
+- `Bun.env` for environment variables
+
+References:
+
+- https://bun.sh/docs/runtime/bun-apis#bunfile
+- https://bun.sh/docs/runtime/networking/fetch
+- https://bun.sh/docs/runtime/module-resolution#importmeta
+- https://bun.sh/docs/guides/process/argv
+- https://bun.sh/docs/runtime/environment-variables

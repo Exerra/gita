@@ -4,17 +4,13 @@ import { cancel, group, intro, outro, select, text, confirm, tasks, Task, log, i
 import chalk from "chalk";
 import simpleGit, { GitResponseError, PushResult } from "simple-git";
 import type { SimpleGit, StatusResult } from "simple-git";
-import { readFile } from "node:fs/promises";
-import { dirname, relative, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
-import { homedir } from "node:os";
+import { relative, resolve } from "node:path";
 
-const currentFilePath = fileURLToPath(import.meta.url);
-const currentDir = dirname(currentFilePath);
+const currentDir = import.meta.dir;
 const packageJsonPath = resolve(currentDir, "../package.json");
-const packageJson = JSON.parse(await readFile(packageJsonPath, "utf8")) as { version?: string };
+const packageJson = JSON.parse(await Bun.file(packageJsonPath).text()) as { version?: string };
 const version = packageJson.version ?? "0.0.0";
-const cliArgs = process.argv.slice(2);
+const cliArgs = Bun.argv.slice(2);
 
 type AiMode = "always" | "ask" | "none";
 type AiConfig = {
@@ -46,6 +42,15 @@ const defaultAiConfig: AiRuntimeConfig = {
     baseUrl: "https://api.openai.com/v1"
 };
 
+const resolveHomeDir = (): string | null => {
+    const home = Bun.env.HOME ?? Bun.env.USERPROFILE;
+    if (home) return home;
+    const homeDrive = Bun.env.HOMEDRIVE;
+    const homePath = Bun.env.HOMEPATH;
+    if (homeDrive && homePath) return `${homeDrive}${homePath}`;
+    return null;
+};
+
 const parseAiMode = (value?: string): AiMode | undefined => {
     if (!value) return undefined;
     const normalized = value.toLowerCase();
@@ -70,7 +75,7 @@ const warnOnConflictingAiFlags = (args: string[]) => {
 
 const readJsonFile = async <T>(filePath: string): Promise<T | null> => {
     try {
-        const raw = await readFile(filePath, "utf8");
+        const raw = await Bun.file(filePath).text();
         return JSON.parse(raw) as T;
     } catch (error) {
         const err = error as { code?: string };
@@ -114,10 +119,10 @@ const mergeAiConfig = (
         merged.temperature = clampTemperature(projectAi.temperature);
     }
 
-    if (!merged.apiKey) merged.apiKey = process.env.GITA_AI_API_KEY ?? process.env.OPENAI_API_KEY;
-    if (!merged.model) merged.model = process.env.GITA_AI_MODEL ?? process.env.OPENAI_MODEL;
+    if (!merged.apiKey) merged.apiKey = Bun.env.GITA_AI_API_KEY ?? Bun.env.OPENAI_API_KEY;
+    if (!merged.model) merged.model = Bun.env.GITA_AI_MODEL ?? Bun.env.OPENAI_MODEL;
     if (!merged.baseUrl) {
-        merged.baseUrl = process.env.GITA_AI_BASE_URL ?? process.env.OPENAI_BASE_URL ?? merged.baseUrl;
+        merged.baseUrl = Bun.env.GITA_AI_BASE_URL ?? Bun.env.OPENAI_BASE_URL ?? merged.baseUrl;
     }
 
     if (cliMode) {
@@ -340,9 +345,13 @@ if (!(await git.checkIsRepo())) {
 }
 
 const repoRoot = (await git.revparse(["--show-toplevel"])).trim()
-const globalConfigPath = resolve(homedir(), ".config", "gita", "config.json")
+const homeDir = resolveHomeDir()
+if (!homeDir) {
+    log.warn("Home directory not detected. Skipping global config.")
+}
+const globalConfigPath = homeDir ? resolve(homeDir, ".config", "gita", "config.json") : null
 const projectConfigPath = resolve(repoRoot, ".gita", "config.json")
-const globalConfig = await readJsonFile<AppConfig>(globalConfigPath)
+const globalConfig = globalConfigPath ? await readJsonFile<AppConfig>(globalConfigPath) : null
 const projectConfig = await readJsonFile<AppConfig>(projectConfigPath)
 warnOnConflictingAiFlags(cliArgs)
 const cliAiMode = parseCliAiMode(cliArgs)
