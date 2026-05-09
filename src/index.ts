@@ -4,7 +4,7 @@ import { cancel, group, intro, outro, select, text, confirm, tasks, Task, log, i
 import chalk from "chalk";
 import simpleGit, { GitResponseError, PushResult } from "simple-git";
 import { readFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const currentFilePath = fileURLToPath(import.meta.url);
@@ -55,6 +55,7 @@ if (isCancel(commitAll)) {
 
 if (commitAll) file = "."
 else {
+    const repoRoot = (await git.revparse(["--show-toplevel"])).trim()
     const status = await git.status()
     const statusFiles = Array.from(new Set([
         ...status.not_added,
@@ -69,12 +70,24 @@ else {
         process.exit(0)
     }
 
+    const fileOptions = statusFiles.map((statusFile) => {
+        const absolutePath = resolve(repoRoot, statusFile)
+        const relativeToBase = relative(baseDir, absolutePath)
+        const displayLabel = relativeToBase.startsWith("..")
+            ? statusFile
+            : relativeToBase.startsWith(".")
+                ? relativeToBase
+                : `./${relativeToBase}`
+
+        return {
+            label: displayLabel,
+            value: relativeToBase
+        }
+    })
+
     const selectedFile = await select({
         message: "Select a file:",
-        options: statusFiles.map((statusFile) => ({
-            label: statusFile,
-            value: statusFile
-        }))
+        options: fileOptions
     })
 
     if (isCancel(selectedFile)) {
@@ -83,11 +96,6 @@ else {
     }
 
     file = selectedFile as string
-
-    if (!statusFiles.includes(file)) {
-        cancel("Selected file is not in git status. No commit has been made.")
-        process.exit(0)
-    }
 }
 
 
