@@ -6,7 +6,8 @@ export const defaultAiConfig: AiRuntimeConfig = {
     mode: "none",
     temperature: 0.2,
     baseUrl: "https://api.openai.com/v1",
-    skipProviderCheck: false
+    skipProviderCheck: false,
+    useConventionalCommits: true
 };
 
 export const parseAiMode = (value?: string): AiMode | undefined => {
@@ -28,7 +29,8 @@ export const parseCliAiMode = (args: string[]): AiMode | undefined => {
 export const mergeAiConfig = (
     globalConfig: AppConfig | null,
     projectConfig: AppConfig | null,
-    cliMode?: AiMode
+    cliMode?: AiMode,
+    onWarn?: (message: string) => void // Phase 7a: surface temperature clamping
 ): AiRuntimeConfig => {
     const merged: AiRuntimeConfig = { ...defaultAiConfig };
     const globalAi = globalConfig?.ai ?? {};
@@ -40,12 +42,17 @@ export const mergeAiConfig = (
     }
     if (typeof globalAi.mode === "string") merged.mode = parseAiMode(globalAi.mode) ?? merged.mode;
     if (typeof globalAi.temperature === "number" && Number.isFinite(globalAi.temperature)) {
-        merged.temperature = clampTemperature(globalAi.temperature);
+        const clamped = clampTemperature(globalAi.temperature);
+        if (clamped !== globalAi.temperature) {
+            onWarn?.(`Temperature ${globalAi.temperature} clamped to ${clamped} (valid range: 0–2).`);
+        }
+        merged.temperature = clamped;
     }
     if (typeof globalAi.apiKey === "string") merged.apiKey = globalAi.apiKey;
     if (typeof globalAi.model === "string") merged.model = globalAi.model;
     if (typeof globalAi.baseUrl === "string") merged.baseUrl = globalAi.baseUrl;
     if (typeof globalAi.skipProviderCheck === "boolean") merged.skipProviderCheck = globalAi.skipProviderCheck;
+    if (typeof globalAi.useConventionalCommits === "boolean") merged.useConventionalCommits = globalAi.useConventionalCommits;
 
     const projectAi = projectConfig?.ai ?? {};
     if (typeof projectAi.enabled === "boolean") {
@@ -54,9 +61,14 @@ export const mergeAiConfig = (
     }
     if (typeof projectAi.mode === "string") merged.mode = parseAiMode(projectAi.mode) ?? merged.mode;
     if (typeof projectAi.temperature === "number" && Number.isFinite(projectAi.temperature)) {
-        merged.temperature = clampTemperature(projectAi.temperature);
+        const clamped = clampTemperature(projectAi.temperature);
+        if (clamped !== projectAi.temperature) {
+            onWarn?.(`Temperature ${projectAi.temperature} clamped to ${clamped} (valid range: 0–2).`);
+        }
+        merged.temperature = clamped;
     }
     if (typeof projectAi.skipProviderCheck === "boolean") merged.skipProviderCheck = projectAi.skipProviderCheck;
+    if (typeof projectAi.useConventionalCommits === "boolean") merged.useConventionalCommits = projectAi.useConventionalCommits;
 
     if (!merged.apiKey) merged.apiKey = Bun.env.GITA_AI_API_KEY ?? Bun.env.OPENAI_API_KEY;
     if (!merged.model) merged.model = Bun.env.GITA_AI_MODEL ?? Bun.env.OPENAI_MODEL;

@@ -81,7 +81,10 @@ const readKnowledgeFiles = async (paths: string[], includeExtensions: string[]) 
     return entries;
 };
 
-export const loadKnowledgeBase = async (config?: KnowledgeBaseConfig): Promise<KnowledgeBase | null> => {
+export const loadKnowledgeBase = async (
+    config?: KnowledgeBaseConfig,
+    onInfo?: (message: string) => void // Phase 7b: feedback on load
+): Promise<KnowledgeBase | null> => {
     const merged = mergeKnowledgeConfig(config);
     if (!merged.enabled) return null;
 
@@ -92,11 +95,14 @@ export const loadKnowledgeBase = async (config?: KnowledgeBaseConfig): Promise<K
         .map((entry) => `Source: ${entry.source}\n${entry.content.trim()}`)
         .join("\n\n");
     const truncatedText = limitText(combined, merged.maxChars);
+    const truncated = truncatedText !== combined;
+
+    onInfo?.(`Knowledge base: ${entries.length} file(s) loaded${truncated ? " (truncated)" : ""}`);
 
     return {
         entries,
         text: truncatedText,
-        truncated: truncatedText !== combined
+        truncated
     };
 };
 

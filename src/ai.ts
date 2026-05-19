@@ -18,10 +18,11 @@ const buildAiPrompt = (
     diffStat: string,
     diff: string,
     commitAll: boolean,
-    file: string,
+    files: string[], // Phase 3b: accept files array
+    useConventionalCommits: boolean,
     knowledgeBase?: KnowledgeBase
 ) => {
-    const scopeLine = commitAll ? "Scope: all changes" : `Scope: ${file}`;
+    const scopeLine = commitAll ? "Scope: all changes" : `Scope: ${files.join(", ")}`;
     const statusSummary = status ? formatStatusSummary(status) : "";
     const diffStatText = diffStat.trim().length > 0 ? diffStat.trim() : "(none)";
     const diffText = diff.trim().length > 0 ? limitText(diff.trim(), 12000) : "(none)";
@@ -30,6 +31,12 @@ const buildAiPrompt = (
         "Generate a concise git commit message for the following changes.",
         scopeLine
     ];
+
+    if (useConventionalCommits) {
+        sections[0] += " Use conventional commits format (e.g. feat:, chore:, fix:, etc).";
+    } else {
+        sections[0] += " DO NOT use conventional commits format (do not use feat:, chore:, fix:, etc). Start directly with the commit message.";
+    }
 
     if (statusSummary) sections.push(`Status:\n${statusSummary}`);
 
@@ -125,17 +132,18 @@ export const generateAiCommitMessage = async (
     gitInstance: SimpleGit,
     ai: AiRuntimeConfig,
     commitAll: boolean,
-    file: string,
+    files: string[], // Phase 3b: accept files array
     status: StatusResult | null,
     logVerbose: (message: string) => void,
+    warn: (message: string) => void, // Phase 5: specific error reporting
     knowledgeBase?: KnowledgeBase
 ): Promise<AiCommitMessage | null> => {
     if (!ai.baseUrl || !ai.model) return null;
 
-    const diffArgs = commitAll ? [] : ["--", file];
+    const diffArgs = commitAll ? [] : ["--", ...files];
     const diffStat = await gitInstance.diff(["--stat", ...diffArgs]);
     const diff = await gitInstance.diff(diffArgs);
-    const prompt = buildAiPrompt(status, diffStat, diff, commitAll, file, knowledgeBase);
+    const prompt = buildAiPrompt(status, diffStat, diff, commitAll, files, ai.useConventionalCommits, knowledgeBase);
 
     try {
         const requestUrl = `${normalizeBaseUrl(ai.baseUrl)}/chat/completions`;
@@ -166,6 +174,18 @@ export const generateAiCommitMessage = async (
 
         if (!response.ok) {
             logVerbose(`AI response status: ${response.status}`);
+            // Phase 5: map status codes to actionable messages
+            if (response.status === 401) {
+                warn("AI authentication failed (401). Check your API key.");
+            } else if (response.status === 403) {
+                warn("AI access forbidden (403). Check your API key permissions.");
+            } else if (response.status === 429) {
+                warn("AI rate limited (429). Try again later.");
+            } else if (response.status >= 500) {
+                warn(`AI provider error (HTTP ${response.status}). The service may be down.`);
+            } else {
+                warn(`AI request failed (HTTP ${response.status}).`);
+            }
             return null;
         }
 
@@ -174,13 +194,35 @@ export const generateAiCommitMessage = async (
         };
         const content = data.choices?.[0]?.message?.content?.trim();
         if (content) logVerbose(`AI raw output:\n${content}`);
-        if (!content) return null;
+        if (!content) {
+            warn("AI returned an empty response.");
+            return null;
+        }
 
         const parsed = parseAiCommitMessage(content);
-        if (!parsed) logVerbose("AI output could not be parsed into title/description.");
+        if (!parsed) {
+            logVerbose("AI output could not be parsed into title/description.");
+            warn("AI response could not be parsed.");
+        }
         return parsed;
     } catch (error) {
         logVerbose(`AI request failed: ${error instanceof Error ? error.message : "unknown error"}`);
+        // Phase 5: distinguish timeout vs network vs other errors
+        if (error instanceof Error) {
+            if (error.name === "AbortError" || error.name === "TimeoutError") {
+                warn("AI request timed out (15s). Try again or check your connection.");
+            } else if (
+                error.message.includes("fetch failed") ||
+                error.message.includes("ECONNREFUSED") ||
+                error.message.includes("ENOTFOUND")
+            ) {
+                warn("AI request failed: network error. Check your connection and base URL.");
+            } else {
+                warn(`AI request failed: ${error.message}`);
+            }
+        } else {
+            warn("AI request failed: unknown error.");
+        }
         return null;
     }
 };

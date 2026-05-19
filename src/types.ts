@@ -8,6 +8,7 @@ export type AiConfig = {
     model?: string;
     baseUrl?: string;
     skipProviderCheck?: boolean;
+    useConventionalCommits?: boolean;
 };
 
 export type KnowledgeBaseConfig = {
@@ -30,6 +31,7 @@ export type AiRuntimeConfig = {
     model?: string;
     baseUrl?: string;
     skipProviderCheck: boolean;
+    useConventionalCommits: boolean;
 };
 
 export type AiCommitMessage = {
