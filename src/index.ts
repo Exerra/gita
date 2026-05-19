@@ -293,6 +293,29 @@ if (remotes.length > 0) {
 let currentPhase: "staging" | "committing" | "pushing" = "staging";
 let pushSucceeded = false;
 
+// Proactively check for missing upstream before running tasks to avoid
+// tasks() rendering a "Canceled" state during error recovery.
+let pushRemote: string | null = null;
+let needsUpstream = false;
+
+if (push) {
+    try {
+        await git.revparse(["--abbrev-ref", "@{u}"]);
+    } catch {
+        needsUpstream = true;
+        log.warn(`There is no upstream branch. Making ${branch} the upstream branch.`);
+        const selectedRemote = await select({
+            message: "What remote to push to?",
+            options: remotes.map(r => ({ label: r.name, value: r.name }))
+        });
+        if (isCancel(selectedRemote)) {
+            cancel(cancelMessage);
+            process.exit(0);
+        }
+        pushRemote = selectedRemote as string;
+    }
+}
+
 try {
     const taskList: Task[] = [
         {
@@ -320,7 +343,11 @@ try {
         title: "Pushing",
         task: async () => {
             currentPhase = "pushing";
-            await git.push();
+            if (needsUpstream && pushRemote) {
+                await git.push(pushRemote, branch, ["--set-upstream"]);
+            } else {
+                await git.push();
+            }
             pushSucceeded = true;
             return "Push complete";
         },
@@ -342,23 +369,6 @@ try {
     } else if (err.message.includes("No configured push destination")) {
         cancel("No remotes available. Cancelling push. Commit is saved. Add a remote, then run git push.");
         process.exit(1); // Phase 1a
-    } else if (err.message.toLowerCase().includes("no upstream branch")) {
-        try {
-            log.warn(`There is no upstream branch. Making ${branch} the upstream branch.`);
-
-            const remote = await select({
-                message: "What remote to push to?",
-                options: remotes.map(r => ({ label: r.name, value: r.name }))
-            });
-
-            await git.push(remote as string, branch, ["--set-upstream"]);
-            pushSucceeded = true;
-        } catch (e) {
-            const err2 = e as GitResponseError<PushResult>;
-            log.error(err2.message);
-            cancel("Gita stopped due to an error.");
-            process.exit(1); // Phase 1a
-        }
     } else {
         log.error(err.message);
         cancel("Gita stopped due to an error.");
