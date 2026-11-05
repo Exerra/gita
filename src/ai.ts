@@ -4,7 +4,7 @@ import { createTimeoutSignal, limitText, normalizeBaseUrl } from "./utils";
 import type { AiCommitMessage, AiRuntimeConfig, KnowledgeBase } from "./types";
 import type { SimpleGit, StatusResult } from "simple-git";
 
-const buildAiHeaders = (ai: AiRuntimeConfig): HeadersInit => {
+const buildAiHeaders = (ai: AiRuntimeConfig): /*HeadersInit*/ Record<string, string> => {
     const headers: Record<string, string> = {
         "Content-Type": "application/json"
     };
@@ -29,6 +29,7 @@ const buildAiPrompt = (
 
     const sections = [
         "Generate a concise git commit message for the following changes.",
+        "Make sure to include relevant information and be specific in the title to understand the purpose of the commit.",
         scopeLine
     ];
 
