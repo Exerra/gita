@@ -36,7 +36,7 @@ Global config path:
 
 `~/.config/gita/config.json`
 
-Project config path (temperature, enabled, mode, knowledge base only):
+Project config path (AI behavior, knowledge base, and Jira settings):
 
 `.gita/config.json`
 
@@ -84,6 +84,32 @@ AI behavior:
 - when enabled, the knowledge base content is appended to the AI prompt before diff context
 
 If the AI provider check fails, Gita falls back to the manual flow.
+
+# Jira issue IDs in commit titles
+
+Enable this in either config file (project settings override global settings):
+
+```json
+{
+  "jira": {
+    "enabled": true,
+    "template": "%ticket% - %title%"
+  }
+}
+```
+
+On branch `feature/scaffold/AI-100`, a title of `feat: add scaffold` becomes
+`AI-100 - feat: add scaffold`. For a suffix, use `"%title% [%ticket%]"`.
+
+- Disabled by default. Enabling it without a template uses `%ticket% - %title%`.
+- `%title%` is the title entered or accepted in the prompt, including AI-generated titles.
+- `%ticket%` contains uppercase Jira issue IDs found in the branch (such as `AI-100`). Multiple IDs are deduplicated in branch order and joined with `, `.
+- Branches without a matching ID, including detached HEAD, keep the original title.
+- Templates must be a single line containing both `%ticket%` and `%title%`. Invalid templates produce a warning and retain the inherited or default template.
+
+Formatting happens locally after title input, before the length warning and commit.
+The final title is displayed when formatting changes it. The branch, extracted IDs,
+and template are not added to the AI request.
 
 # Knowledge base
 

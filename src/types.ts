@@ -18,9 +18,20 @@ export type KnowledgeBaseConfig = {
     includeExtensions?: string[];
 };
 
+export type JiraConfig = {
+    enabled?: boolean;
+    template?: string;
+};
+
+export type JiraRuntimeConfig = {
+    enabled: boolean;
+    template: string;
+};
+
 export type AppConfig = {
     ai?: AiConfig;
     knowledgeBase?: KnowledgeBaseConfig;
+    jira?: JiraConfig;
 };
 
 export type AiRuntimeConfig = {

@@ -1,5 +1,36 @@
 import { clampTemperature } from "./utils";
-import type { AiMode, AiRuntimeConfig, AppConfig } from "./types";
+import type { AiMode, AiRuntimeConfig, AppConfig, JiraRuntimeConfig } from "./types";
+
+export const defaultJiraConfig: JiraRuntimeConfig = {
+    enabled: false,
+    template: "%ticket% - %title%"
+};
+
+export const mergeJiraConfig = (
+    globalConfig: AppConfig | null,
+    projectConfig: AppConfig | null,
+    onWarn?: (message: string) => void
+): JiraRuntimeConfig => {
+    const merged = { ...defaultJiraConfig };
+
+    for (const config of [globalConfig?.jira, projectConfig?.jira]) {
+        if (typeof config?.enabled === "boolean") merged.enabled = config.enabled;
+        if (typeof config?.template !== "undefined") {
+            if (
+                typeof config.template === "string" &&
+                config.template.includes("%ticket%") &&
+                config.template.includes("%title%") &&
+                !/[\r\n\0]/.test(config.template)
+            ) {
+                merged.template = config.template;
+            } else {
+                onWarn?.("Jira template must be a single line containing %ticket% and %title%. Using the previous or default template.");
+            }
+        }
+    }
+
+    return merged;
+};
 
 export const defaultAiConfig: AiRuntimeConfig = {
     enabled: false,

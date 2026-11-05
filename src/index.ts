@@ -6,7 +6,8 @@ import simpleGit, { GitResponseError, PushResult } from "simple-git";
 import type { StatusResult } from "simple-git";
 import { relative, resolve } from "node:path";
 import { checkAiProviderStatus, generateAiCommitMessage } from "./ai";
-import { mergeAiConfig, parseCliAiMode, warnOnConflictingAiFlags } from "./config";
+import { mergeAiConfig, mergeJiraConfig, parseCliAiMode, warnOnConflictingAiFlags } from "./config";
+import { formatCommitTitle } from "./jira";
 import { loadKnowledgeBase, mergeKnowledgeConfig } from "./knowledge";
 import type { AppConfig, AiMode } from "./types";
 import { logVerbose as logVerboseBase, readJsonFile, resolveHomeDir } from "./utils";
@@ -225,6 +226,7 @@ await ensureGitRepo();
 const repoRoot = (await git.revparse(["--show-toplevel"])).trim();
 const { globalConfig, projectConfig } = await loadConfigs(repoRoot);
 const aiConfig = loadAiConfig(globalConfig, projectConfig);
+const jiraConfig = mergeJiraConfig(globalConfig, projectConfig, (message) => log.warn(message));
 const knowledgeBaseConfig = mergeKnowledgeConfig({
     ...(globalConfig?.knowledgeBase ?? {}),
     ...(projectConfig?.knowledgeBase ?? {})
@@ -257,7 +259,13 @@ const questions = await group(
     }
 )
 
-const { title, description } = questions;
+const { title: inputTitle, description } = questions;
+const branch = status.current ?? "HEAD";
+const title = formatCommitTitle(inputTitle, branch, jiraConfig);
+
+if (title !== inputTitle) {
+    note(title, "Commit title");
+}
 
 // Phase 6b: title length warning (non-blocking)
 if (title.length > 72) {
@@ -265,7 +273,6 @@ if (title.length > 72) {
 }
 
 // Phase 6c: push confirm with branch/remote context + detached HEAD check
-const branch = (await git.revparse(["--abbrev-ref", "HEAD"])).trim();
 const remotes = await git.getRemotes();
 
 let push = false;
