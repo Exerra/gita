@@ -4,6 +4,7 @@ export type AiConfig = {
     enabled?: boolean;
     mode?: AiMode;
     temperature?: number;
+    maxRetries?: number;
     apiKey?: string;
     model?: string;
     baseUrl?: string;
@@ -38,6 +39,7 @@ export type AiRuntimeConfig = {
     enabled: boolean;
     mode: AiMode;
     temperature: number;
+    maxRetries: number;
     apiKey?: string;
     model?: string;
     baseUrl?: string;

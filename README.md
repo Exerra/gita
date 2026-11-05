@@ -48,6 +48,7 @@ Example global config:
     "enabled": true,
     "mode": "ask",
     "temperature": 0.2,
+    "maxRetries": 2,
     "model": "gpt-4o-mini",
     "baseUrl": "https://api.openai.com/v1",
     "skipProviderCheck": false,
@@ -64,6 +65,7 @@ Example project config (safe subset):
     "enabled": true,
     "mode": "always",
     "temperature": 0.1,
+    "maxRetries": 2,
     "skipProviderCheck": false
   },
   "knowledgeBase": {
@@ -81,9 +83,17 @@ AI behavior:
 - `ask`: prompt with AI default
 - `none`: manual commit message prompts
 - `skipProviderCheck`: skip the `/models` provider check (some providers do not support this endpoint)
+- `maxRetries`: automatic retries after the initial attempt, for both provider checks and commit generation (default: `2`, so up to `3` attempts per operation). Set `0` to disable retries. Project settings override global settings; invalid values retain the inherited or default value. Must be a non-negative safe integer.
 - when enabled, the knowledge base content is appended to the AI prompt before diff context
 
-If the AI provider check fails, Gita falls back to the manual flow.
+HTTP errors (including authentication and rate limits), network errors, timeouts,
+invalid response bodies, and empty or malformed commit JSON all trigger retries.
+Retries wait 500ms, then 1s, doubling up to 4s between attempts. JSON inside Markdown
+fences or surrounding commentary is accepted when it contains a valid title and
+optional description; malformed JSON is never used as a raw commit title.
+After either operation exhausts its retries, Gita falls back to the manual flow.
+Missing base URL or model settings fall back immediately because retries cannot
+resolve missing configuration.
 
 # Jira issue IDs in commit titles
 

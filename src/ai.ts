@@ -52,33 +52,81 @@ const buildAiPrompt = (
     return sections.join("\n\n");
 };
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+    typeof value === "object" && value !== null && !Array.isArray(value);
+
 export const parseAiCommitMessage = (content: string): AiCommitMessage | null => {
     let text = content.trim();
     if (!text) return null;
 
-    const fenced = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+    const fenced = text.match(/(?:^|\r?\n)[ \t]*```(?:json)?\s*([\s\S]*?)\s*```/i);
     if (fenced) text = fenced[1].trim();
 
-    if (text.startsWith("{") && text.endsWith("}")) {
+    try {
+        let parsed: unknown;
         try {
-            const parsed = JSON.parse(text) as { title?: string; description?: string };
-            const title = typeof parsed.title === "string" ? parsed.title.trim() : "";
-            const description = typeof parsed.description === "string" ? parsed.description.trim() : "";
-            if (!title) return null;
-            return { title, description: description || undefined };
+            parsed = JSON.parse(text);
         } catch {
+            // Tolerate surrounding commentary, while keeping malformed JSON out of commit titles.
+            if (text.startsWith("[") || text.startsWith('"')) return null;
+            const objectStart = text.indexOf("{");
+            const objectEnd = text.lastIndexOf("}");
+            if (objectStart < 0 || objectEnd < objectStart) return null;
+            parsed = JSON.parse(text.slice(objectStart, objectEnd + 1));
+        }
+        if (!isRecord(parsed) || typeof parsed.title !== "string") return null;
+        const title = parsed.title.trim();
+        if (!title || /[\r\n\0]/.test(title)) return null;
+        if (parsed.description != null && typeof parsed.description !== "string") return null;
+        const description = typeof parsed.description === "string" ? parsed.description.trim() : "";
+        return { title, description: description || undefined };
+    } catch {
+        return null;
+    }
+};
+
+const describeAiError = (error: unknown): string => {
+    if (!(error instanceof Error)) return "Unknown error.";
+    if (error.name === "AbortError" || error.name === "TimeoutError") {
+        return "Request timed out. Check your connection.";
+    }
+    if (/fetch failed|ECONNREFUSED|ENOTFOUND/i.test(error.message)) {
+        return "Network error. Check your connection and base URL.";
+    }
+    return error.message;
+};
+
+const aiHttpError = (status: number): Error => {
+    if (status === 401) return new Error("Authentication failed (401). Check your API key.");
+    if (status === 403) return new Error("Access forbidden (403). Check your API key permissions.");
+    if (status === 429) return new Error("Rate limited (429). Try again later.");
+    if (status >= 500) return new Error(`Provider error (HTTP ${status}). The service may be down.`);
+    return new Error(`Request failed (HTTP ${status}).`);
+};
+
+const withAiRetries = async <T>(
+    ai: AiRuntimeConfig,
+    label: string,
+    operation: () => Promise<T>,
+    logVerbose: (message: string) => void,
+    warn: (message: string) => void
+): Promise<T | null> => {
+    for (let attempt = 0; ; attempt += 1) {
+        try {
+            logVerbose(`${label}: attempt ${attempt + 1}/${ai.maxRetries + 1}.`);
+            return await operation();
+        } catch (error) {
+            const message = `${label} failed: ${describeAiError(error)}`;
+            logVerbose(message);
+            if (attempt >= ai.maxRetries) {
+                warn(`${message} Failed after ${attempt + 1} attempt(s). Falling back to manual commit messages.`);
+                return null;
+            }
+            const delayMs = 500 * 2 ** Math.min(attempt, 3);
+            warn(`${message} Retrying (${attempt + 1}/${ai.maxRetries}) in ${delayMs}ms.`);
+            await Bun.sleep(delayMs);
         }
     }
-
-    const lines = text
-        .split(/\r?\n/)
-        .map((line) => line.trim())
-        .filter(Boolean);
-    if (lines.length === 0) return null;
-
-    const title = lines[0];
-    const description = lines.slice(1).join(" ").trim();
-    return { title, description: description || undefined };
 };
 
 export const checkAiProviderStatus = async (
@@ -86,7 +134,8 @@ export const checkAiProviderStatus = async (
     logVerbose: (message: string) => void,
     warn: (message: string) => void
 ): Promise<boolean> => {
-    if (!ai.baseUrl) {
+    const { baseUrl } = ai;
+    if (!baseUrl) {
         logVerbose("AI provider check: missing base URL.");
         warn("AI base URL missing. Falling back to manual commit messages.");
         return false;
@@ -103,8 +152,8 @@ export const checkAiProviderStatus = async (
         return true;
     }
 
-    try {
-        const requestUrl = `${normalizeBaseUrl(ai.baseUrl)}/models`;
+    return (await withAiRetries(ai, "AI provider check", async () => {
+        const requestUrl = `${normalizeBaseUrl(baseUrl)}/models`;
         logVerbose(
             `AI provider check request: GET ${requestUrl} | timeout=4000ms | auth=${ai.apiKey ? "yes" : "no"}`
         );
@@ -114,19 +163,11 @@ export const checkAiProviderStatus = async (
             signal: createTimeoutSignal(4000)
         });
 
-        if (!response.ok) {
-            logVerbose(`AI provider check failed with status ${response.status}.`);
-            warn(`AI provider check failed (${response.status}). Falling back to manual commit messages.`);
-            return false;
-        }
+        if (!response.ok) throw aiHttpError(response.status);
 
         logVerbose("AI provider check succeeded.");
         return true;
-    } catch {
-        logVerbose("AI provider check failed: request error.");
-        warn("AI provider check failed. Falling back to manual commit messages.");
-        return false;
-    }
+    }, logVerbose, warn)) ?? false;
 };
 
 export const generateAiCommitMessage = async (
@@ -139,15 +180,19 @@ export const generateAiCommitMessage = async (
     warn: (message: string) => void, // Phase 5: specific error reporting
     knowledgeBase?: KnowledgeBase
 ): Promise<AiCommitMessage | null> => {
-    if (!ai.baseUrl || !ai.model) return null;
+    const { baseUrl, model } = ai;
+    if (!baseUrl || !model) return null;
 
-    const diffArgs = commitAll ? [] : ["--", ...files];
-    const diffStat = await gitInstance.diff(["--stat", ...diffArgs]);
-    const diff = await gitInstance.diff(diffArgs);
-    const prompt = buildAiPrompt(status, diffStat, diff, commitAll, files, ai.useConventionalCommits, knowledgeBase);
+    let prompt: string | undefined;
+    return withAiRetries(ai, "AI commit generation", async () => {
+        if (prompt === undefined) {
+            const diffArgs = commitAll ? [] : ["--", ...files];
+            const diffStat = await gitInstance.diff(["--stat", ...diffArgs]);
+            const diff = await gitInstance.diff(diffArgs);
+            prompt = buildAiPrompt(status, diffStat, diff, commitAll, files, ai.useConventionalCommits, knowledgeBase);
+        }
 
-    try {
-        const requestUrl = `${normalizeBaseUrl(ai.baseUrl)}/chat/completions`;
+        const requestUrl = `${normalizeBaseUrl(baseUrl)}/chat/completions`;
         logVerbose(`AI commit request: POST ${requestUrl}`);
         logVerbose(
             `AI commit request meta: model=${ai.model} | temperature=${ai.temperature} | max_tokens=180 | timeout=15000ms | prompt_chars=${prompt.length} | auth=${ai.apiKey ? "yes" : "no"}`
@@ -173,57 +218,21 @@ export const generateAiCommitMessage = async (
             })
         });
 
-        if (!response.ok) {
-            logVerbose(`AI response status: ${response.status}`);
-            // Phase 5: map status codes to actionable messages
-            if (response.status === 401) {
-                warn("AI authentication failed (401). Check your API key.");
-            } else if (response.status === 403) {
-                warn("AI access forbidden (403). Check your API key permissions.");
-            } else if (response.status === 429) {
-                warn("AI rate limited (429). Try again later.");
-            } else if (response.status >= 500) {
-                warn(`AI provider error (HTTP ${response.status}). The service may be down.`);
-            } else {
-                warn(`AI request failed (HTTP ${response.status}).`);
-            }
-            return null;
-        }
+        if (!response.ok) throw aiHttpError(response.status);
 
-        const data = (await response.json()) as {
-            choices?: Array<{ message?: { content?: string } }>;
-        };
-        const content = data.choices?.[0]?.message?.content?.trim();
+        const data: unknown = await response.json();
+        const choice: unknown = isRecord(data) && Array.isArray(data.choices) ? data.choices[0] : undefined;
+        const message = isRecord(choice) && isRecord(choice.message) ? choice.message : undefined;
+        const content = typeof message?.content === "string" ? message.content.trim() : "";
         if (content) logVerbose(`AI raw output:\n${content}`);
         if (!content) {
-            warn("AI returned an empty response.");
-            return null;
+            throw new Error("AI returned an empty or invalid response.");
         }
 
         const parsed = parseAiCommitMessage(content);
         if (!parsed) {
-            logVerbose("AI output could not be parsed into title/description.");
-            warn("AI response could not be parsed.");
+            throw new Error("AI response could not be parsed into a valid JSON title/description.");
         }
         return parsed;
-    } catch (error) {
-        logVerbose(`AI request failed: ${error instanceof Error ? error.message : "unknown error"}`);
-        // Phase 5: distinguish timeout vs network vs other errors
-        if (error instanceof Error) {
-            if (error.name === "AbortError" || error.name === "TimeoutError") {
-                warn("AI request timed out (15s). Try again or check your connection.");
-            } else if (
-                error.message.includes("fetch failed") ||
-                error.message.includes("ECONNREFUSED") ||
-                error.message.includes("ENOTFOUND")
-            ) {
-                warn("AI request failed: network error. Check your connection and base URL.");
-            } else {
-                warn(`AI request failed: ${error.message}`);
-            }
-        } else {
-            warn("AI request failed: unknown error.");
-        }
-        return null;
-    }
+    }, logVerbose, warn);
 };

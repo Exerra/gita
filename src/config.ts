@@ -36,6 +36,7 @@ export const defaultAiConfig: AiRuntimeConfig = {
     enabled: false,
     mode: "none",
     temperature: 0.2,
+    maxRetries: 2,
     baseUrl: "https://api.openai.com/v1",
     skipProviderCheck: false,
     useConventionalCommits: true
@@ -100,6 +101,15 @@ export const mergeAiConfig = (
     }
     if (typeof projectAi.skipProviderCheck === "boolean") merged.skipProviderCheck = projectAi.skipProviderCheck;
     if (typeof projectAi.useConventionalCommits === "boolean") merged.useConventionalCommits = projectAi.useConventionalCommits;
+
+    for (const config of [globalAi, projectAi]) {
+        if (typeof config.maxRetries === "undefined") continue;
+        if (typeof config.maxRetries === "number" && Number.isSafeInteger(config.maxRetries) && config.maxRetries >= 0) {
+            merged.maxRetries = config.maxRetries;
+        } else {
+            onWarn?.("AI maxRetries must be a non-negative safe integer. Using the previous or default value.");
+        }
+    }
 
     if (!merged.apiKey) merged.apiKey = Bun.env.GITA_AI_API_KEY ?? Bun.env.OPENAI_API_KEY;
     if (!merged.model) merged.model = Bun.env.GITA_AI_MODEL ?? Bun.env.OPENAI_MODEL;
