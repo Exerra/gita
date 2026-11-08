@@ -1,6 +1,6 @@
 #! /usr/bin/env bun
 
-import { cancel, group, intro, outro, select, text, confirm, tasks, Task, log, isCancel, spinner, multiselect, note } from "@clack/prompts";
+import { cancel, group, intro, outro, select, text, confirm, tasks, Task, log, isCancel, spinner, note } from "@clack/prompts";
 import chalk from "chalk";
 import simpleGit, { GitResponseError, PushResult } from "simple-git";
 import type { StatusResult } from "simple-git";
@@ -8,6 +8,7 @@ import { relative, resolve } from "node:path";
 import { checkAiProviderStatus, generateAiCommitMessage } from "./ai";
 import { mergeAiConfig, mergeJiraConfig, parseCliAiMode, warnOnConflictingAiFlags } from "./config";
 import { formatCommitTitle } from "./jira";
+import { selectChangedFiles } from "./file-picker";
 import { loadKnowledgeBase, mergeKnowledgeConfig } from "./knowledge";
 import type { AppConfig, AiMode } from "./types";
 import { logVerbose as logVerboseBase, readJsonFile, resolveHomeDir } from "./utils";
@@ -115,14 +116,9 @@ const formatFileStatus = (status: StatusResult): string => {
 
 const selectCommitTarget = async (repoRoot: string) => {
     // Fetch status first so we can preview before confirming
-    const status = await git.status();
-    const statusFiles = Array.from(new Set([
-        ...status.not_added,
-        ...status.modified,
-        ...status.created,
-        ...status.deleted,
-        ...status.renamed.map(({ to }) => to)
-    ]));
+    // Expand untracked directories so their individual files can be selected too.
+    const status = await git.status(["--untracked-files=all"]);
+    const statusFiles = status.files;
 
     if (statusFiles.length === 0) {
         cancel("No changed files found. Nothing to commit.");
@@ -141,26 +137,9 @@ const selectCommitTarget = async (repoRoot: string) => {
 
     if (commitAll) return { commitAll, files: ["."] as string[], status };
 
-    const fileOptions = statusFiles.map((statusFile) => {
-        const absolutePath = resolve(repoRoot, statusFile);
-        const relativeToBase = relative(baseDir, absolutePath);
-        const displayLabel = relativeToBase.startsWith("..")
-            ? statusFile
-            : relativeToBase.startsWith(".")
-                ? relativeToBase
-                : `./${relativeToBase}`;
-
-        return {
-            label: displayLabel,
-            value: relativeToBase
-        };
-    });
-
-    // Phase 3b: multiselect instead of single select
-    const selectedFiles = await multiselect({
-        message: "Select files to stage:",
-        options: fileOptions,
-        required: true
+    log.info("Paths in the picker are relative to the repository root.");
+    const selectedFiles = await selectChangedFiles({
+        files: statusFiles.map((file) => ({ path: file.path, status: file.index + file.working_dir }))
     });
 
     if (isCancel(selectedFiles)) {
@@ -168,7 +147,11 @@ const selectCommitTarget = async (repoRoot: string) => {
         process.exit(0);
     }
 
-    return { commitAll, files: selectedFiles as string[], status };
+    return {
+        commitAll,
+        files: selectedFiles.map((file) => relative(baseDir, resolve(repoRoot, file))),
+        status
+    };
 };
 
 const shouldUseAiPrompt = async (mode: AiMode): Promise<boolean> => {

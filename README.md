@@ -23,6 +23,21 @@ Run inside a git repository.
 gita
 ```
 
+When asked whether to stage all changes, choose **No** to pick folders and files
+from a tree. Paths are relative to the repository root, even when running Gita
+from a subdirectory.
+
+- **↑ / ↓** moves through the tree; **← / →** closes or opens a folder.
+- **Space** toggles a file, or all changed files inside a folder (including nested folders).
+- Folder counts show selected / changed files. **[x]** means all selected;
+  **[-]** means partly selected. Open a selected folder to exclude individual files.
+- **a** selects all files, or clears the selection when everything is selected.
+- **Enter** continues with the selected files; **Esc / Ctrl+C** cancels.
+
+New folders can be opened to select individual untracked files. Ignored and
+unchanged files are excluded from the tree. Selecting a folder stages its exact
+listed files.
+
 AI mode overrides (CLI flags take precedence):
 
 ```bash
