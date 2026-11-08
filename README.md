@@ -94,12 +94,17 @@ Example project config (safe subset):
 
 AI behavior:
 
+- AI status, diffstat, and diff include only the selected files. Paths are treated
+  literally, including names containing brackets or other Git pattern characters.
+- Diffs include staged and unstaged changes and selected untracked files, including
+  on the first commit. AI context preparation leaves your staging area unchanged.
 - `always`: always use AI to draft the title/description
 - `ask`: prompt with AI default
 - `none`: manual commit message prompts
 - `skipProviderCheck`: skip the `/models` provider check (some providers do not support this endpoint)
 - `maxRetries`: automatic retries after the initial attempt, for both provider checks and commit generation (default: `2`, so up to `3` attempts per operation). Set `0` to disable retries. Project settings override global settings; invalid values retain the inherited or default value. Must be a non-negative safe integer.
-- when enabled, the knowledge base content is appended to the AI prompt before diff context
+- knowledge-base context is disabled by default; when explicitly enabled, its
+  documents are listed before generation and included independently of file selection
 
 HTTP errors (including authentication and rate limits), network errors, timeouts,
 invalid response bodies, and empty or malformed commit JSON all trigger retries.
@@ -138,7 +143,10 @@ and template are not added to the AI request.
 
 # Knowledge base
 
-Gita can include local docs in AI commit prompts. Drop files into `.gita/knowledge` by default.
+Gita can include local docs in AI commit prompts. Set `knowledgeBase.enabled` to
+`true` to opt in, then drop files into `.gita/knowledge` by default. These docs are
+additional context, independent of the commit picker. Their paths are displayed
+before generation. Set `knowledgeBase.enabled` to `false` to exclude them.
 
 Settings:
 

@@ -1,4 +1,4 @@
-import { formatStatusSummary } from "./git";
+import { collectAiContext } from "./ai-context";
 import { buildKnowledgeSection } from "./knowledge";
 import { createTimeoutSignal, limitText, normalizeBaseUrl } from "./utils";
 import type { AiCommitMessage, AiRuntimeConfig, KnowledgeBase } from "./types";
@@ -14,7 +14,7 @@ const buildAiHeaders = (ai: AiRuntimeConfig): /*HeadersInit*/ Record<string, str
 };
 
 const buildAiPrompt = (
-    status: StatusResult | null,
+    statusSummary: string,
     diffStat: string,
     diff: string,
     commitAll: boolean,
@@ -23,7 +23,6 @@ const buildAiPrompt = (
     knowledgeBase?: KnowledgeBase
 ) => {
     const scopeLine = commitAll ? "Scope: all changes" : `Scope: ${files.join(", ")}`;
-    const statusSummary = status ? formatStatusSummary(status) : "";
     const diffStatText = diffStat.trim().length > 0 ? diffStat.trim() : "(none)";
     const diffText = diff.trim().length > 0 ? limitText(diff.trim(), 12000) : "(none)";
 
@@ -186,10 +185,8 @@ export const generateAiCommitMessage = async (
     let prompt: string | undefined;
     return withAiRetries(ai, "AI commit generation", async () => {
         if (prompt === undefined) {
-            const diffArgs = commitAll ? [] : ["--", ...files];
-            const diffStat = await gitInstance.diff(["--stat", ...diffArgs]);
-            const diff = await gitInstance.diff(diffArgs);
-            prompt = buildAiPrompt(status, diffStat, diff, commitAll, files, ai.useConventionalCommits, knowledgeBase);
+            const { statusSummary, diffStat, diff } = await collectAiContext(gitInstance, commitAll, files, status);
+            prompt = buildAiPrompt(statusSummary, diffStat, diff, commitAll, files, ai.useConventionalCommits, knowledgeBase);
         }
 
         const requestUrl = `${normalizeBaseUrl(baseUrl)}/chat/completions`;

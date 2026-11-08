@@ -1,8 +1,9 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import type { SimpleGit, StatusResult } from "simple-git";
 import { generateAiCommitMessage } from "./ai";
 import { defaultAiConfig, defaultJiraConfig, mergeJiraConfig } from "./config";
 import { extractJiraIssueIds, formatCommitTitle } from "./jira";
+import * as aiContext from "./ai-context";
 
 describe("Jira config", () => {
     test("is opt-in, even when only a template is configured", () => {
@@ -76,6 +77,9 @@ describe("commit title formatting", () => {
     });
 
     test("formats AI output locally without including branch metadata in the request", async () => {
+        const contextMock = spyOn(aiContext, "collectAiContext").mockResolvedValue({
+            statusSummary: "M\tscaffold.ts", diffStat: "scaffold changes", diff: "scaffold changes"
+        });
         let requestBody = "";
         const server = Bun.serve({
             hostname: "127.0.0.1",
@@ -117,6 +121,7 @@ describe("commit title formatting", () => {
             expect(requestBody).not.toContain("%title%");
             expect(formatCommitTitle(message!.title, branch, enabledConfig)).toBe("AI-100 - feat: add scaffold");
         } finally {
+            contextMock.mockRestore();
             server.stop(true);
         }
     });

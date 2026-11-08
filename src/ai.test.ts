@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import type { SimpleGit } from "simple-git";
 import { checkAiProviderStatus, generateAiCommitMessage, parseAiCommitMessage } from "./ai";
 import { defaultAiConfig, mergeAiConfig } from "./config";
+import * as aiContext from "./ai-context";
 import type { AppConfig } from "./types";
 
 describe("AI retry config", () => {
@@ -62,7 +63,8 @@ describe("AI commit JSON parsing", () => {
 describe("AI retries", () => {
     const ai = { ...defaultAiConfig, enabled: true, model: "test-model", baseUrl: "https://ai.example/v1" };
     const validResponse = () => Response.json({ choices: [{ message: { content: '{"title":"fix: retries"}' } }] });
-    const git = { diff: async () => "changes" } as unknown as SimpleGit;
+    const git = {} as SimpleGit;
+    let contextMock: ReturnType<typeof spyOn<typeof aiContext, "collectAiContext">>;
     let fetchMock: ReturnType<typeof spyOn<typeof globalThis, "fetch">>;
     let sleepMock: ReturnType<typeof spyOn<typeof Bun, "sleep">>;
     let warnings: string[];
@@ -73,11 +75,15 @@ describe("AI retries", () => {
 
     beforeEach(() => {
         warnings = [];
+        contextMock = spyOn(aiContext, "collectAiContext").mockResolvedValue({
+            statusSummary: "M\tsrc/ai.ts", diffStat: "changes", diff: "changes"
+        });
         fetchMock = spyOn(globalThis, "fetch").mockRejectedValue(new Error("Unexpected AI request"));
         sleepMock = spyOn(Bun, "sleep").mockResolvedValue(undefined);
     });
 
     afterEach(() => {
+        contextMock.mockRestore();
         fetchMock.mockRestore();
         sleepMock.mockRestore();
     });
@@ -119,11 +125,9 @@ describe("AI retries", () => {
     });
 
     test("success needs no retries and keeps the same diff and request on retry", async () => {
-        let diffCalls = 0;
-        const gitInstance = { diff: async () => { diffCalls += 1; return "changes"; } } as unknown as SimpleGit;
         fetchMock.mockResolvedValueOnce(new Response(null, { status: 503 })).mockResolvedValueOnce(validResponse());
-        expect(await generate(2, gitInstance)).toEqual({ title: "fix: retries", description: undefined });
-        expect(diffCalls).toBe(2);
+        expect(await generate(2)).toEqual({ title: "fix: retries", description: undefined });
+        expect(contextMock).toHaveBeenCalledTimes(1);
         expect(fetchMock.mock.calls[0][1]?.body).toBe(fetchMock.mock.calls[1][1]?.body);
         warnings = [];
         sleepMock.mockClear();
@@ -187,10 +191,9 @@ describe("AI retries", () => {
     });
 
     test("AI context preparation failures retry and then fall back without crashing", async () => {
-        let diffCalls = 0;
-        const gitInstance = { diff: async () => { diffCalls += 1; throw new Error("diff unavailable"); } } as unknown as SimpleGit;
-        expect(await generate(1, gitInstance)).toBeNull();
-        expect(diffCalls).toBe(2);
+        contextMock.mockRejectedValue(new Error("diff unavailable"));
+        expect(await generate(1)).toBeNull();
+        expect(contextMock).toHaveBeenCalledTimes(2);
         expect(fetchMock).not.toHaveBeenCalled();
         expect(warnings.at(-1)).toContain("Falling back");
     });

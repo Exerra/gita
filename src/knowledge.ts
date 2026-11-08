@@ -4,7 +4,7 @@ import { limitText } from "./utils";
 import type { KnowledgeBase, KnowledgeBaseConfig } from "./types";
 
 const defaultKnowledgeConfig: Required<KnowledgeBaseConfig> = {
-    enabled: true,
+    enabled: false,
     paths: [".gita/knowledge"],
     maxChars: 6000,
     includeExtensions: [
@@ -62,10 +62,10 @@ const collectFiles = async (root: string, includeExtensions: string[]) => {
     return entries;
 };
 
-const readKnowledgeFiles = async (paths: string[], includeExtensions: string[]) => {
+const readKnowledgeFiles = async (paths: string[], includeExtensions: string[], baseDir: string) => {
     const entries: { source: string; content: string }[] = [];
     for (const root of paths) {
-        const absoluteRoot = resolve(process.cwd(), root);
+        const absoluteRoot = resolve(baseDir, root);
         const files = await collectFiles(absoluteRoot, includeExtensions);
         for (const filePath of files) {
             try {
@@ -83,12 +83,13 @@ const readKnowledgeFiles = async (paths: string[], includeExtensions: string[]) 
 
 export const loadKnowledgeBase = async (
     config?: KnowledgeBaseConfig,
-    onInfo?: (message: string) => void // Phase 7b: feedback on load
+    onInfo?: (message: string) => void,
+    baseDir = process.cwd()
 ): Promise<KnowledgeBase | null> => {
     const merged = mergeKnowledgeConfig(config);
     if (!merged.enabled) return null;
 
-    const entries = await readKnowledgeFiles(merged.paths, merged.includeExtensions);
+    const entries = await readKnowledgeFiles(merged.paths, merged.includeExtensions, baseDir);
     if (entries.length === 0) return null;
 
     const combined = entries

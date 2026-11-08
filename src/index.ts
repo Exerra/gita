@@ -6,6 +6,7 @@ import simpleGit, { GitResponseError, PushResult } from "simple-git";
 import type { StatusResult } from "simple-git";
 import { relative, resolve } from "node:path";
 import { checkAiProviderStatus, generateAiCommitMessage } from "./ai";
+import { includeRenameSources, literalPathspecs, stageSelectedFiles } from "./ai-context";
 import { mergeAiConfig, mergeJiraConfig, parseCliAiMode, warnOnConflictingAiFlags } from "./config";
 import { formatCommitTitle } from "./jira";
 import { selectChangedFiles } from "./file-picker";
@@ -149,7 +150,7 @@ const selectCommitTarget = async (repoRoot: string) => {
 
     return {
         commitAll,
-        files: selectedFiles.map((file) => relative(baseDir, resolve(repoRoot, file))),
+        files: includeRenameSources(selectedFiles, status).map((file) => relative(baseDir, resolve(repoRoot, file))),
         status
     };
 };
@@ -185,6 +186,15 @@ const resolveAiCommitMessage = async (
     const providerReady = await checkAiProviderStatus(aiConfig, logVerbose, (message) => log.warn(message));
     if (!providerReady) return null;
 
+    if (knowledgeBase) {
+        note([
+            "Knowledge base is enabled in config. These documents are also sent to AI:",
+            ...knowledgeBase.entries.map((entry) => `  ${relative(repoRoot, entry.source)}`),
+            "They are included independently of the file selection.",
+            'Set knowledgeBase.enabled to false to exclude them.'
+        ].join("\n"), "Additional AI context");
+    }
+
     const resolvedStatus = status ?? (await git.status());
     const aiSpinner = spinner();
     aiSpinner.start("Generating AI commit message");
@@ -215,7 +225,7 @@ const knowledgeBaseConfig = mergeKnowledgeConfig({
     ...(projectConfig?.knowledgeBase ?? {})
 });
 // Phase 7b: pass info callback (verbose-only since it's non-essential)
-const knowledgeBase = await loadKnowledgeBase(knowledgeBaseConfig, (msg) => logVerbose(msg));
+const knowledgeBase = await loadKnowledgeBase(knowledgeBaseConfig, (msg) => logVerbose(msg), repoRoot);
 const { commitAll, files, status } = await selectCommitTarget(repoRoot);
 const aiCommitMessage = await resolveAiCommitMessage(aiConfig, commitAll, files, status, knowledgeBase);
 
@@ -313,7 +323,7 @@ try {
             task: async () => {
                 currentPhase = "staging";
                 if (commitAll) await git.add(["--all"]);
-                else await git.add(files);
+                else await stageSelectedFiles(git, files);
                 return "Staging complete";
             },
         },
@@ -323,7 +333,7 @@ try {
                 currentPhase = "committing";
                 const msg = description ? [title, description] : title;
                 if (commitAll) await git.commit(msg);
-                else await git.commit(msg, files);
+                else await git.commit(msg, literalPathspecs(files));
                 return "Commit complete";
             },
         }
